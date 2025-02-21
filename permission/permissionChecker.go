@@ -5,15 +5,13 @@ import (
 	"strings"
 )
 
-// Importing DTO package for data transfer objects
-
-// The CheckPermission function checks if a distributor has access to certain test data based on their
+// CheckPermission verifies if a distributor has access to a given set of regions based on their
 // inclusion and exclusion lists.
 func CheckPermission(distributorName string, inputData map[string]bool, distributorInformation map[string]dto.Distributor, origin string) []string {
 	var validationResult []string
 	var errorMsg []string
 
-	// Get distributor data by name
+	// Retrieve distributor data
 	distributorData, found := distributorInformation[distributorName]
 	if !found {
 		return []string{"Distributor " + distributorName + " not found"}
@@ -22,43 +20,45 @@ func CheckPermission(distributorName string, inputData map[string]bool, distribu
 	// Helper function to check access
 	checkAccess := func(region string) bool {
 		if distributorData.Exclude[region] {
-			return false
+			return false // Excluded regions override inclusion
 		}
-		if distributorData.Include[region] {
-			return true
-		}
-		return false
+		return distributorData.Include[region]
 	}
 
-	for data := range inputData {
-		regionParts := strings.Split(data, "-")
+	for region := range inputData {
+		regionParts := strings.Split(region, "-")
 		regionLevel := len(regionParts)
 
 		hasAccess := false
+
 		switch regionLevel {
-		case 1:
-			hasAccess = checkAccess(data)
-		case 2:
+		case 1: // Country-level access check
+			hasAccess = checkAccess(region)
+
+		case 2: // State-Country level check
 			countryRegion := regionParts[1]
-			hasAccess = (checkAccess(countryRegion) && !distributorData.Exclude[data]) || checkAccess(data)
-		case 3:
+			hasAccess = checkAccess(region) || (checkAccess(countryRegion) && !distributorData.Exclude[region])
+
+		case 3: // City-State-Country level check
 			countryRegion := regionParts[2]
 			stateRegion := regionParts[1] + "-" + regionParts[2]
 
+			// If country is accessible
 			if checkAccess(countryRegion) {
 				if checkAccess(stateRegion) {
-					hasAccess = checkAccess(data) || !distributorData.Exclude[data]
+					hasAccess = checkAccess(region) || !distributorData.Exclude[region]
 				} else {
-					hasAccess = !distributorData.Exclude[stateRegion] && !distributorData.Exclude[data]
+					hasAccess = !distributorData.Exclude[stateRegion] && !distributorData.Exclude[region]
 				}
 			} else {
-				hasAccess = checkAccess(stateRegion) && !distributorData.Exclude[data] || checkAccess(data)
+				hasAccess = checkAccess(stateRegion) && !distributorData.Exclude[region] || checkAccess(region)
 			}
 		}
 
-		message := distributorData.Name + " does not have access to " + data
+		// Construct access message
+		message := distributorData.Name + " does not have access to " + region
 		if hasAccess {
-			message = distributorData.Name + " has access to " + data
+			message = distributorData.Name + " has access to " + region
 		}
 
 		validationResult = append(validationResult, message)
@@ -67,6 +67,7 @@ func CheckPermission(distributorName string, inputData map[string]bool, distribu
 		}
 	}
 
+	// Return errors if this check is for sub-distribution creation
 	if origin == "subDistributionCreation" {
 		return errorMsg
 	}

@@ -6,16 +6,17 @@ import (
 	"strings"
 )
 
-// The function `ValidateDistributorData` validates the data of a sub-distributor, checking for
-// errors such as empty fields, duplicate names, invalid regions, and incorrect parent distributor
-// name.
+// ValidateDistributorData validates a distributor's data, checking for empty fields, invalid regions,
+// duplicate names, and verifying the existence of a parent distributor if it's a sub-distributor.
 func ValidateDistributorData(data dto.Distributor, groupedData map[string]map[string]map[string]bool, distributorInformation map[string]dto.Distributor, subDistributor bool) []string {
 	var errorMsg []string
 
+	// Validate distributor name
 	if strings.TrimSpace(data.Name) == "" {
 		errorMsg = append(errorMsg, "Distributor Name must not be empty, please enter a valid distributor name")
 	}
 
+	// Validate include regions
 	if len(data.Include) == 0 {
 		errorMsg = append(errorMsg, "Include Regions must not be empty, please enter valid regions")
 	} else {
@@ -26,15 +27,18 @@ func ValidateDistributorData(data dto.Distributor, groupedData map[string]map[st
 		}
 	}
 
+	// Validate exclude regions
 	for region := range data.Exclude {
 		if !ValidateRegion(region, groupedData) {
 			errorMsg = append(errorMsg, "Exclude Region '"+region+"' is not present in csv, please enter a valid region")
 		}
+		// Ensure exclude region is not also in include regions
 		if _, exists := data.Include[region]; exists {
 			errorMsg = append(errorMsg, "Exclude Region '"+region+"' should not be the same as Include Region, please enter a valid region")
 		}
 	}
 
+	// If the distributor is a sub-distributor, validate parent distributor
 	if subDistributor {
 		if strings.TrimSpace(data.Parent) == "" {
 			errorMsg = append(errorMsg, "Parent distributor Name must not be empty, please enter a valid parent distributor name")
@@ -43,21 +47,22 @@ func ValidateDistributorData(data dto.Distributor, groupedData map[string]map[st
 		}
 
 		if len(errorMsg) == 0 {
-			// InputData := append(GetKeys(data.Include), GetKeys(data.Exclude)...)
+			// Combine include and exclude regions for permission check
 			InputData := make(map[string]bool)
 
-			// First, add all include values
+			// Add all included regions
 			for key, value := range data.Include {
 				InputData[key] = value
 			}
 
-			// Only add exclude values if the key is not already in InputData
+			// Add exclude regions only if they are not already in include regions
 			for key, value := range data.Exclude {
 				if _, exists := InputData[key]; !exists {
 					InputData[key] = value
 				}
 			}
 
+			// Check if the parent distributor allows sub-distribution in these regions
 			checkPermissionWithParent := permission.CheckPermission(strings.TrimSpace(data.Parent), InputData, distributorInformation, "subDistributionCreation")
 			if len(checkPermissionWithParent) > 0 {
 				errorMsg = append(errorMsg, checkPermissionWithParent...)
@@ -68,8 +73,7 @@ func ValidateDistributorData(data dto.Distributor, groupedData map[string]map[st
 	return errorMsg
 }
 
-// The function "ValidateDistributorName" checks if a given distributor name exists in a list of
-// distributor information.
+// ValidateDistributorName checks if a given distributor name exists in the distributor information map.
 func ValidateDistributorName(distributorName string, distributorInformation map[string]dto.Distributor) bool {
 	for _, distributor := range distributorInformation {
 		if strings.EqualFold(distributor.Name, distributorName) {
@@ -81,30 +85,26 @@ func ValidateDistributorName(distributorName string, distributorInformation map[
 
 // ValidateRegion checks if a given region exists in the structured map data.
 func ValidateRegion(region string, groupedData map[string]map[string]map[string]bool) bool {
-
 	regionParts := strings.Split(strings.ToUpper(strings.TrimSpace(region)), "-")
 	regionLevel := len(regionParts)
 
+	// Validate region level (1 = Country, 2 = State-Country, 3 = City-State-Country)
 	if regionLevel == 0 || regionLevel > 3 {
 		return false
 	}
 
 	switch regionLevel {
 	case 1: // Country level
-		if _, countryExists := groupedData[regionParts[0]]; !countryExists {
-			return false
-		}
+		_, countryExists := groupedData[regionParts[0]]
+		return countryExists
 
 	case 2: // State level (State-Country)
 		countryName := regionParts[1]
 		stateName := regionParts[0]
 
 		if states, countryExists := groupedData[countryName]; countryExists {
-			if _, stateExists := states[stateName]; !stateExists {
-				return false
-			}
-		} else {
-			return false
+			_, stateExists := states[stateName]
+			return stateExists
 		}
 
 	case 3: // City level (City-State-Country)
@@ -114,29 +114,28 @@ func ValidateRegion(region string, groupedData map[string]map[string]map[string]
 
 		if states, countryExists := groupedData[countryName]; countryExists {
 			if cities, stateExists := states[stateName]; stateExists {
-				if _, cityExists := cities[cityName]; cityExists {
-					return true
-				}
+				_, cityExists := cities[cityName]
+				return cityExists
 			}
 		}
-		return false // If city not found
+		return false
 	}
 
-	return true // All regions exist in the map
+	return true
 }
 
-// The function `ValidateCheckPermissionData` validates the `CheckPermissionData` object by checking if
-// the distributor name is not empty and exists in the distributor information, and if all the regions
-// in the data exist in the grouped data.
+// ValidateCheckPermissionData validates the distributor name and regions in a CheckPermissionData object.
 func ValidateCheckPermissionData(data dto.CheckPermissionData, groupedData map[string]map[string]map[string]bool, distributorInformation map[string]dto.Distributor) []string {
 	var errorMsg []string
 
+	// Validate distributor name
 	if strings.TrimSpace(data.DistributorName) == "" {
 		errorMsg = append(errorMsg, "Distributor Name must not be empty, please enter a valid distributor name")
 	} else if !ValidateDistributorName(strings.ToUpper(strings.TrimSpace(data.DistributorName)), distributorInformation) {
 		errorMsg = append(errorMsg, "Distributor name does not exist")
 	}
 
+	// Validate regions
 	for region := range data.Regions {
 		if !ValidateRegion(region, groupedData) {
 			errorMsg = append(errorMsg, strings.ToUpper(region)+" does not exist in the csv file, please enter a valid region")
